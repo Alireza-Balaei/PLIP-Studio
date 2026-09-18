@@ -11,33 +11,70 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
 
     steps:
+      # ---------------------------------------------------------------
+      # 1. Get the code
+      # ---------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ---------------------------------------------------------------
+      # 2. Python — NO cache: pip line (that was the source of the fail)
+      # ---------------------------------------------------------------
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          architecture: x64
 
-      - name: Install Python dependencies
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
+
+      # ---------------------------------------------------------------
+      # 3. Install build tools only (fast)
+      # ---------------------------------------------------------------
+      - name: Install build tools
+        run: pip install pyinstaller pillow
+
+      # ---------------------------------------------------------------
+      # 4. Convert icon.png -> icon.ico (automatically, in CI)
+      # ---------------------------------------------------------------
+      - name: Convert PNG to ICO
         run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller pillow
+          python -c "from PIL import Image; Image.open('icon.png').save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
 
-      - name: Convert icon.png to icon.ico
-        run: |
-          python -c "from PIL import Image; img = Image.open('icon.png'); img.save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
-
+      # ---------------------------------------------------------------
+      # 5. Build the .exe — onedir is far more reliable than onefile
+      #    for packages with C extensions like PyMOL and OpenBabel.
+      # ---------------------------------------------------------------
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --name="PLIP Studio" plip_studio.py
+          pyinstaller --noconfirm --onedir --windowed ^
+            --name "PLIP Studio" ^
+            --icon icon.ico ^
+            --collect-all plip ^
+            --collect-all openbabel ^
+            --collect-all lxml ^
+            --collect-all pymol ^
+            --hidden-import plip.basic.config ^
+            --hidden-import plip.plipcmd ^
+            --hidden-import Bio ^
+            --hidden-import numpy ^
+            --hidden-import lxml.etree ^
+            --hidden-import lxml._elementpath ^
+            plip_studio.py
 
+      # ---------------------------------------------------------------
+      # 6. Install Inno Setup via Chocolatey (always available on runner)
+      # ---------------------------------------------------------------
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
+      # ---------------------------------------------------------------
+      # 7. Generate the Inno Setup script with absolute paths
+      # ---------------------------------------------------------------
       - name: Create Inno Setup script
         shell: pwsh
         run: |
@@ -46,37 +83,60 @@ jobs:
           [Setup]
           AppName=PLIP Studio
           AppVersion=2.0.1
+          AppPublisher=Alireza Balaei
+          AppPublisherURL=https://github.com/Alireza-Balaei/PLIP-Studio
           DefaultDirName={autopf}\PLIP Studio
           DefaultGroupName=PLIP Studio
           OutputDir=$ws\installer
           OutputBaseFilename=PLIP_Studio_Setup_v2.0.1
           SetupIconFile=$ws\icon.ico
-          Compression=lzma
+          Compression=lzma2
           SolidCompression=yes
           WizardStyle=modern
+          ArchitecturesInstallIn64BitMode=x64
+          ArchitecturesAllowed=x64
+          DisableProgramGroupPage=yes
+          UninstallDisplayIcon={app}\PLIP Studio.exe
+
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional icons:"; Flags: unchecked
 
           [Files]
-          Source: "$ws\dist\PLIP Studio.exe"; DestDir: "{app}"; Flags: ignoreversion
-          Source: "$ws\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$ws\dist\PLIP Studio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
           [Icons]
-          Name: "{group}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\icon.ico"
-          Name: "{autodesktop}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\icon.ico"
+          Name: "{group}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\PLIP Studio.exe"
+          Name: "{group}\Uninstall PLIP Studio"; Filename: "{uninstallexe}"
+          Name: "{autodesktop}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\PLIP Studio.exe"; Tasks: desktopicon
 
           [Run]
           Filename: "{app}\PLIP Studio.exe"; Description: "Launch PLIP Studio"; Flags: nowait postinstall skipifsilent
           "@
-          $iss | Out-File -FilePath installer_setup.iss -Encoding UTF8
-          Write-Host "=== installer_setup.iss created ==="
-          Get-Content installer_setup.iss
+          $iss | Out-File -FilePath installer.iss -Encoding UTF8
+          Write-Host "=== installer.iss ==="
+          Get-Content installer.iss
 
+      # ---------------------------------------------------------------
+      # 8. Compile the installer
+      # ---------------------------------------------------------------
       - name: Compile installer with Inno Setup
         run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_setup.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
 
-      - name: List installer folder
-        run: dir installer
+      # ---------------------------------------------------------------
+      # 9. Show what was built (for debugging)
+      # ---------------------------------------------------------------
+      - name: List output
+        run: |
+          Get-ChildItem installer
+          Get-ChildItem "dist\PLIP Studio" | Select-Object -First 20
 
+      # ---------------------------------------------------------------
+      # 10. Upload to the GitHub Release
+      # ---------------------------------------------------------------
       - name: Upload installer to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
