@@ -1,0 +1,88 @@
+name: Build Windows Installer
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        shell: cmd
+        run: |
+          python -m pip install --upgrade pip
+          if exist requirements.txt (
+            pip install -r requirements.txt
+          )
+          pip install pyinstaller
+
+      - name: Build EXE
+        shell: cmd
+        run: |
+          pyinstaller ^
+            --noconfirm ^
+            --clean ^
+            --windowed ^
+            --onefile ^
+            --name "PLIP-Studio" ^
+            --icon "icon.ico" ^
+            --add-data "icon.png;." ^
+            plip_studio.py
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup -y
+
+      - name: Create Installer Script
+        shell: powershell
+        run: |
+          @"
+          [Setup]
+          AppName=PLIP Studio
+          AppVersion=${{ github.event.release.tag_name }}
+          DefaultDirName={autopf}\PLIP Studio
+          DefaultGroupName=PLIP Studio
+          OutputDir=installer
+          OutputBaseFilename=PLIP-Studio-Setup-${{ github.event.release.tag_name }}
+          Compression=lzma
+          SolidCompression=yes
+          ArchitecturesInstallIn64BitMode=x64
+          SetupIconFile=icon.ico
+
+          [Files]
+          Source: "dist\PLIP-Studio.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+          [Icons]
+          Name: "{group}\PLIP Studio"; Filename: "{app}\PLIP-Studio.exe"
+          Name: "{autodesktop}\PLIP Studio"; Filename: "{app}\PLIP-Studio.exe"
+
+          [Run]
+          Filename: "{app}\PLIP-Studio.exe"; Description: "Launch PLIP Studio"; Flags: nowait postinstall skipifsilent
+          "@ | Out-File -Encoding UTF8 installer.iss
+
+      - name: Build Installer
+        shell: cmd
+        run: |
+          mkdir installer
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+      - name: Upload Installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: |
+            installer/PLIP-Studio-Setup-${{ github.event.release.tag_name }}.exe
+          fail_on_unmatched_files: true
