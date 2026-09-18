@@ -22,53 +22,62 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller pillow plip openbabel lxml pymol-open-source
+          pip install pyinstaller pillow
 
-      - name: Convert PNG to ICO
+      - name: Convert icon.png to icon.ico
         run: |
-          python -c "
-          from PIL import Image
-          img = Image.open('icon.png')
-          img.save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])
-          "
+          python -c "from PIL import Image; img = Image.open('icon.png'); img.save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
 
       - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --name="PLIP Studio" --hidden-import=plip --hidden-import=openbabel --hidden-import=lxml --hidden-import=pymol plip_studio.py
+          pyinstaller --onefile --windowed --icon=icon.ico --name="PLIP Studio" plip_studio.py
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
 
       - name: Create Inno Setup script
+        shell: pwsh
         run: |
-          @'
+          $ws = "${{ github.workspace }}"
+          $iss = @"
           [Setup]
           AppName=PLIP Studio
           AppVersion=2.0.1
           DefaultDirName={autopf}\PLIP Studio
           DefaultGroupName=PLIP Studio
-          OutputDir=installer
+          OutputDir=$ws\installer
           OutputBaseFilename=PLIP_Studio_Setup_v2.0.1
-          SetupIconFile=icon.ico
+          SetupIconFile=$ws\icon.ico
           Compression=lzma
           SolidCompression=yes
           WizardStyle=modern
 
           [Files]
-          Source: "dist\PLIP Studio.exe"; DestDir: "{app}"; Flags: ignoreversion
-          Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$ws\dist\PLIP Studio.exe"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$ws\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
           [Icons]
           Name: "{group}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\icon.ico"
           Name: "{autodesktop}\PLIP Studio"; Filename: "{app}\PLIP Studio.exe"; IconFilename: "{app}\icon.ico"
-          '@ | Out-File -Encoding UTF8 installer_setup.iss
 
-      - name: Compile Installer with Inno Setup
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.9
-        with:
-          path: installer_setup.iss
+          [Run]
+          Filename: "{app}\PLIP Studio.exe"; Description: "Launch PLIP Studio"; Flags: nowait postinstall skipifsilent
+          "@
+          $iss | Out-File -FilePath installer_setup.iss -Encoding UTF8
+          Write-Host "=== installer_setup.iss created ==="
+          Get-Content installer_setup.iss
 
-      - name: Upload Installer to Release
+      - name: Compile installer with Inno Setup
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer_setup.iss
+
+      - name: List installer folder
+        run: dir installer
+
+      - name: Upload installer to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
