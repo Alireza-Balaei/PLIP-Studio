@@ -14,15 +14,9 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      # ---------------------------------------------------------------
-      # 1. Get the code
-      # ---------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ---------------------------------------------------------------
-      # 2. Python — NO cache: pip line (that was the source of the fail)
-      # ---------------------------------------------------------------
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -32,49 +26,18 @@ jobs:
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
 
-      # ---------------------------------------------------------------
-      # 3. Install build tools only (fast)
-      # ---------------------------------------------------------------
       - name: Install build tools
         run: pip install pyinstaller pillow
 
-      # ---------------------------------------------------------------
-      # 4. Convert icon.png -> icon.ico (automatically, in CI)
-      # ---------------------------------------------------------------
       - name: Convert PNG to ICO
-        run: |
-          python -c "from PIL import Image; Image.open('icon.png').save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
+        run: python -c "from PIL import Image; Image.open('icon.png').save('icon.ico', format='ICO', sizes=[(256,256),(128,128),(64,64),(48,48),(32,32),(16,16)])"
 
-      # ---------------------------------------------------------------
-      # 5. Build the .exe — onedir is far more reliable than onefile
-      #    for packages with C extensions like PyMOL and OpenBabel.
-      # ---------------------------------------------------------------
       - name: Build EXE with PyInstaller
-        run: |
-          pyinstaller --noconfirm --onedir --windowed ^
-            --name "PLIP Studio" ^
-            --icon icon.ico ^
-            --collect-all plip ^
-            --collect-all openbabel ^
-            --collect-all lxml ^
-            --collect-all pymol ^
-            --hidden-import plip.basic.config ^
-            --hidden-import plip.plipcmd ^
-            --hidden-import Bio ^
-            --hidden-import numpy ^
-            --hidden-import lxml.etree ^
-            --hidden-import lxml._elementpath ^
-            plip_studio.py
+        run: pyinstaller --noconfirm --onedir --windowed --name "PLIP Studio" --icon icon.ico --collect-all plip --collect-all openbabel --collect-all lxml --hidden-import plip.basic.config --hidden-import plip.plipcmd --hidden-import lxml.etree --hidden-import lxml._elementpath plip_studio.py
 
-      # ---------------------------------------------------------------
-      # 6. Install Inno Setup via Chocolatey (always available on runner)
-      # ---------------------------------------------------------------
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
 
-      # ---------------------------------------------------------------
-      # 7. Generate the Inno Setup script with absolute paths
-      # ---------------------------------------------------------------
       - name: Create Inno Setup script
         shell: pwsh
         run: |
@@ -116,27 +79,16 @@ jobs:
           Filename: "{app}\PLIP Studio.exe"; Description: "Launch PLIP Studio"; Flags: nowait postinstall skipifsilent
           "@
           $iss | Out-File -FilePath installer.iss -Encoding UTF8
-          Write-Host "=== installer.iss ==="
           Get-Content installer.iss
 
-      # ---------------------------------------------------------------
-      # 8. Compile the installer
-      # ---------------------------------------------------------------
       - name: Compile installer with Inno Setup
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        run: "& 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' installer.iss"
 
-      # ---------------------------------------------------------------
-      # 9. Show what was built (for debugging)
-      # ---------------------------------------------------------------
       - name: List output
         run: |
           Get-ChildItem installer
           Get-ChildItem "dist\PLIP Studio" | Select-Object -First 20
 
-      # ---------------------------------------------------------------
-      # 10. Upload to the GitHub Release
-      # ---------------------------------------------------------------
       - name: Upload installer to Release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
