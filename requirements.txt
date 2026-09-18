@@ -1,0 +1,5 @@
+# Runtime dependencies for PLIP Studio
+plip
+openbabel
+lxml
+pymol-open-source
